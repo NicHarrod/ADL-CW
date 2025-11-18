@@ -30,6 +30,14 @@ class SiameseCNN(nn.Module):
 
 
         # convolutional layers:
+        self.conv1 = nn.Conv2d(
+            in_channels=self.input_shape.channels,
+            out_channels=32,
+            kernel_size=(5, 5),
+            padding=(2, 2),
+        )
+        self.initialise_layer(self.conv1)
+
 
 
 
@@ -52,7 +60,7 @@ class SiameseCNN(nn.Module):
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
 
-        
+
         # do conv for each image in the pair
         # 
         # 
@@ -68,5 +76,13 @@ class SiameseCNN(nn.Module):
         
 
 
+    
         return x
     
+    
+    @staticmethod
+    def initialise_layer(layer):
+        if hasattr(layer, "bias"):
+            nn.init.zeros_(layer.bias)
+        if hasattr(layer, "weight"):
+            nn.init.kaiming_normal_(layer.weight)
