@@ -1,6 +1,7 @@
 import time
 from multiprocessing import cpu_count
 from typing import Union, NamedTuple
+from dataloader import ProgressionDataset
 
 import torch
 import torch.backends.cudnn
@@ -207,7 +208,30 @@ def test_CNN():
     resize = transforms.Resize((224, 224))
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
-   
+
+
+def main():
+    transform = transforms.ToTensor()
+    """
+        Initialize the ProgressionDataset.
+
+        Parameters
+        ----------
+        root_dir : str
+            Root directory containing recipe folders or image pairs.
+        transform : callable, optional
+            Optional torchvision transform for image preprocessing.
+        mode : str, default='train'
+            Operation mode: 'train', 'val', or 'test'.
+        recipe_ids_list : list of str, optional
+            List of recipe folder names (required for 'train' mode).
+        epoch_size : int, optional
+            Number of samples per epoch (required for 'train' mode).
+        label_file : str, optional
+            Path to text file containing image pair indices and labels 
+            (required for 'val'/'test' mode).
+        """
+    data_loader = ProgressionDataset("dataset", transform=transform, mode="train")
 
 if __name__ == "__main__":
     test_CNN()
