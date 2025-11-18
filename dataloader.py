@@ -124,7 +124,7 @@ class ProgressionDataset(Dataset):
             raise ValueError(f"Unknown mode: {self.mode}. Choose from 'train', 'val', 'test'.")
 
     def _generate_pair(self):
-       """
+        """
         Randomly generate a training pair and its label.
 
         Returns

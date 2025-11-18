@@ -195,8 +195,8 @@ class SiameseCNN(nn.Module):
         # 
 
         # concatenate the outputs to give 1x1x1024 - here x and y are results of convolution at layer 7 and 8 
-        feat_map_1 = self.gap (x)
-        feat_map_2 = self.gap (y)
+        feat_map_1 = self.gap (conv_outputs[0])
+        feat_map_2 = self.gap (conv_outputs[1])
 
         # flatten the feature maps to turn (B,512,1,1) into (B,512)
         flat_feat_map_1 = feat_map_1.flatten(start_dim=1)
@@ -221,7 +221,7 @@ class SiameseCNN(nn.Module):
 
 
     
-        return 
+        return final_output
     
 
     @staticmethod
@@ -241,7 +241,15 @@ def test_CNN():
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
 
-
+def test_forward():
+    model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
+    # generate 2 batches of 1 image each
+    sample_inputs = [torch.randn(1, 3, 512, 512), torch.randn(1, 3, 512, 512)]
+    # resize inputs to 224x224 using transforms
+    resize = transforms.Resize((224, 224))
+    sample_inputs = [resize(img) for img in sample_inputs]
+    output = model(sample_inputs)
+    print(output.shape)
 def main():
     transform = transforms.ToTensor()
     """
@@ -266,4 +274,4 @@ def main():
     data_loader = ProgressionDataset("dataset", transform=transform, mode="train")
 
 if __name__ == "__main__":
-    test_CNN()
+    test_forward()
