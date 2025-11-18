@@ -139,26 +139,26 @@ class SiameseCNN(nn.Module):
 
 
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
-        print(x.shape)
+        
         x = F.relu(self.batch_norm_1_0(self.conv_1_0(x)))
         x = F.relu(self.batch_norm_1_1(self.conv_1_1(x))) 
         x= self.pool1(x)  
-        print(x.shape)
+        
 
         x= F.relu(self.batch_norm2_0(self.conv2_0(x)))
         x= F.relu(self.batch_norm2_1(self.conv2_1(x)))
         x= self.pool2(x)   
-        print(x.shape)
+        
 
         x= F.relu(self.batch_norm3_0(self.conv3_0(x)))
         x= F.relu(self.batch_norm3_1(self.conv3_1(x)))
         x= self.pool3(x)
-        print(x.shape)
+        
 
         x= F.relu(self.batch_norm4_0(self.conv4_0(x)))
         x= F.relu(self.batch_norm4_1(self.conv4_1(x)))
         x= self.pool4(x)
-        print(x.shape)
+        
 
         return x
 
