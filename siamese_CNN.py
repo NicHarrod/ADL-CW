@@ -54,7 +54,7 @@ class SiameseCNN(nn.Module):
         self.batch_norm_1_1 = nn.BatchNorm2d(64)
         self.initialise_layer(self.conv_1_1)
 
-        # self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
+        self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
         # second conv layer pair:
 
@@ -77,7 +77,7 @@ class SiameseCNN(nn.Module):
         self.batch_norm2_1 = nn.BatchNorm2d(128)
         self.initialise_layer(self.conv2_1)
 
-        # self.pool2 = nn.AdaptiveAvgPool2d(56)
+        self.pool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
         
         # third conv layer pair:
 
@@ -98,7 +98,7 @@ class SiameseCNN(nn.Module):
         )
         self.batch_norm3_1 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_1)
-        # self.pool3_1 = nn.AdaptiveAvgPool2d(28)
+        self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
         # fourth conv layer pair:
 
@@ -119,7 +119,7 @@ class SiameseCNN(nn.Module):
         )
         self.batch_norm4_1 = nn.BatchNorm2d(512)
         self.initialise_layer(self.conv4_1)
-        # self.pool4_1 = nn.AdaptiveAvgPool2d(14)
+        self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
 
 
@@ -140,14 +140,28 @@ class SiameseCNN(nn.Module):
 
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
         print(x.shape)
-
         x = F.relu(self.batch_norm_1_0(self.conv_1_0(x)))
-        x = F.relu(self.batch_norm_1_1(self.conv_1_1(x)))
+        x = F.relu(self.batch_norm_1_1(self.conv_1_1(x))) 
+        x= self.pool1(x)  
+        print(x.shape)
 
-        print(x.shape)        
+        x= F.relu(self.batch_norm2_0(self.conv2_0(x)))
+        x= F.relu(self.batch_norm2_1(self.conv2_1(x)))
+        x= self.pool2(x)   
+        print(x.shape)
 
+        x= F.relu(self.batch_norm3_0(self.conv3_0(x)))
+        x= F.relu(self.batch_norm3_1(self.conv3_1(x)))
+        x= self.pool3(x)
+        print(x.shape)
 
-        return 
+        x= F.relu(self.batch_norm4_0(self.conv4_0(x)))
+        x= F.relu(self.batch_norm4_1(self.conv4_1(x)))
+        x= self.pool4(x)
+        print(x.shape)
+
+        return x
+
 
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
@@ -155,11 +169,13 @@ class SiameseCNN(nn.Module):
 
         # do conv for each image in the pair
         conv_outputs = []
+        # [anchor,comparator]
         for image in images:
             x = self.convForward(image)
             conv_outputs.append(x)
-        # 
-        # 
+        
+        
+
         # 
         # 
         # concatenate the outputs
@@ -172,7 +188,7 @@ class SiameseCNN(nn.Module):
 
 
     
-        return x
+        return 
     
 
     @staticmethod
@@ -181,3 +197,17 @@ class SiameseCNN(nn.Module):
             nn.init.zeros_(layer.bias)
         if hasattr(layer, "weight"):
             nn.init.kaiming_normal_(layer.weight)
+
+
+def test_CNN():
+    model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
+    # generate 2 batches of 1 image each
+    sample_inputs = [torch.randn(1, 3, 512, 512), torch.randn(1, 3, 512, 512)]
+    # resize inputs to 224x224 using transforms
+    resize = transforms.Resize((224, 224))
+    sample_inputs = [resize(img) for img in sample_inputs]
+    output = model(sample_inputs)
+   
+
+if __name__ == "__main__":
+    test_CNN()
