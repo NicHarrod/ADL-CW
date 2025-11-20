@@ -1,3 +1,4 @@
+import os
 import time
 from multiprocessing import cpu_count
 from typing import Union, NamedTuple
@@ -13,6 +14,8 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
+import argparse
+import pathlib
 
 
 class ImageShape(NamedTuple):
@@ -20,6 +23,11 @@ class ImageShape(NamedTuple):
     width: int
     channels: int
 
+
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda")
+else:
+    DEVICE = torch.device("cpu")
 
 
 class SiameseCNN(nn.Module):
@@ -203,7 +211,7 @@ class SiameseCNN(nn.Module):
         flat_feat_map_2 = feat_map_2.flatten(start_dim=1)
 
         concatenated_features = torch.cat ((flat_feat_map_1, flat_feat_map_2), dim=1)
-        print (f"concatenated shape: {concatenated_features.shape}")
+        # print (f"concatenated shape: {concatenated_features.shape}")
 
         # FC layer 1 
         fc_output = self.fc1 (concatenated_features)
@@ -249,8 +257,8 @@ def test_forward():
     resize = transforms.Resize((224, 224))
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
-    print(output.shape)
-def main():
+    # print(output.shape)
+def main(args):
     transform = transforms.ToTensor()
     """
         Initialize the ProgressionDataset.
@@ -271,7 +279,340 @@ def main():
             Path to text file containing image pair indices and labels 
             (required for 'val'/'test' mode).
         """
-    data_loader = ProgressionDataset("dataset", transform=transform, mode="train")
+
+
+
+
+    transform = transforms.ToTensor()
+
+    train_dataset = ProgressionDataset(
+        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train",epoch_size=args.epochs*50, recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+    )
+    test_dataset = ProgressionDataset(
+        root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test", label_file=str(args.dataset_root / "test_labels.txt")
+    )
+
+    val_dataset = ProgressionDataset(   
+        root_dir=os.path.join(args.dataset_root, "val"), transform=transform, mode="val", label_file=str(args.dataset_root / "val_labels.txt")
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        shuffle=True,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        num_workers=args.worker_count,
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        shuffle=False,
+        batch_size=args.batch_size,
+        num_workers=args.worker_count,
+        pin_memory=True,
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset,
+        shuffle=False,
+        batch_size=args.batch_size,
+        num_workers=args.worker_count,
+        pin_memory=True,
+    )
+
+    model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
+
+    criterion = nn.CrossEntropyLoss()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+
+    log_dir = get_summary_writer_log_dir(args)
+    print(f"Writing logs to {log_dir}")
+    summary_writer = SummaryWriter(
+            str(log_dir),
+            flush_secs=5
+    )
+    trainer = Trainer(
+        model, train_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
+    )
+
+    trainer.train(
+        args.epochs,
+        args.val_frequency,
+        print_frequency=args.print_frequency,
+        log_frequency=args.log_frequency,
+    )
+
+    summary_writer.close()
+
+
+
+
+
+
+class Trainer:
+    def __init__(
+        self,
+        model: nn.Module,
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        criterion: nn.Module,
+        optimizer: Optimizer,
+        summary_writer: SummaryWriter,
+        device: torch.device,
+    ):
+        self.model = model.to(device)
+        self.device = device
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.summary_writer = summary_writer
+        self.step = 0
+
+    def train(
+        self,
+        epochs: int,
+        val_frequency: int,
+        print_frequency: int = 20,
+        log_frequency: int = 5,
+        start_epoch: int = 0
+    ):
+        self.model.train()
+        for epoch in range(start_epoch, epochs):
+            self.model.train()
+            data_load_start_time = time.time()
+            for img_a, img_b, labels in self.train_loader:
+                batch = [img_a, img_b]
+                batch = [b.to(self.device) for b in batch]
+                labels = labels.to(self.device)
+                data_load_end_time = time.time()
+
+
+
+                logits = self.model.forward(batch)
+                # print(logits.shape)
+             
+
+
+                loss = self.criterion(logits,labels)
+
+                loss.backward()
+
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                with torch.no_grad():
+                    preds = logits.argmax(-1)
+                    accuracy = compute_accuracy(labels, preds)
+
+                data_load_time = data_load_end_time - data_load_start_time
+                step_time = time.time() - data_load_end_time
+                if ((self.step + 1) % log_frequency) == 0:
+                    self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
+                if ((self.step + 1) % print_frequency) == 0:
+                    self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
+
+                self.step += 1
+                data_load_start_time = time.time()
+            # for batch, labels in self.train_loader:
+            #     batch = batch.to(self.device)
+            #     labels = labels.to(self.device)
+            #     data_load_end_time = time.time()
+
+
+
+            #     logits = self.model.forward(batch)
+            #     print(logits.shape)
+             
+
+
+            #     loss = self.criterion(logits,labels)
+
+            #     loss.backward()
+
+            #     self.optimizer.step()
+            #     self.optimizer.zero_grad()
+            #     with torch.no_grad():
+            #         preds = logits.argmax(-1)
+            #         accuracy = compute_accuracy(labels, preds)
+
+            #     data_load_time = data_load_end_time - data_load_start_time
+            #     step_time = time.time() - data_load_end_time
+            #     if ((self.step + 1) % log_frequency) == 0:
+            #         self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
+            #     if ((self.step + 1) % print_frequency) == 0:
+            #         self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
+
+            #     self.step += 1
+            #     data_load_start_time = time.time()
+
+            self.summary_writer.add_scalar("epoch", epoch, self.step)
+            if ((epoch + 1) % val_frequency) == 0:
+                self.validate()
+                # self.validate() will put the model in validation mode,
+                # so we have to switch back to train mode afterwards
+                self.model.train()
+
+    def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
+        epoch_step = self.step % len(self.train_loader)
+        print(
+                f"epoch: [{epoch}], "
+                f"step: [{epoch_step}/{len(self.train_loader)}], "
+                f"batch loss: {loss:.5f}, "
+                f"batch accuracy: {accuracy * 100:2.2f}, "
+                f"data load time: "
+                f"{data_load_time:.5f}, "
+                f"step time: {step_time:.5f}"
+        )
+
+    def log_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
+        self.summary_writer.add_scalar("epoch", epoch, self.step)
+        self.summary_writer.add_scalars(
+                "accuracy",
+                {"train": accuracy},
+                self.step
+        )
+        self.summary_writer.add_scalars(
+                "loss",
+                {"train": float(loss.item())},
+                self.step
+        )
+        self.summary_writer.add_scalar(
+                "time/data", data_load_time, self.step
+        )
+        self.summary_writer.add_scalar(
+                "time/data", step_time, self.step
+        )
+
+    def validate(self):
+        results = {"preds": [], "labels": []}
+        total_loss = 0
+        self.model.eval()
+
+        # No need to track gradients for validation, we're not optimizing.
+        with torch.no_grad():
+            for img_a, img_b, labels in self.val_loader:
+                batch = [img_a, img_b]
+                batch = [b.to(self.device) for b in batch]
+                labels = labels.to(self.device)
+                logits = self.model(batch)
+                loss = self.criterion(logits, labels)
+                total_loss += loss.item()
+                preds = logits.argmax(dim=-1).cpu().numpy()
+                results["preds"].extend(list(preds))
+                results["labels"].extend(list(labels.cpu().numpy()))
+
+        accuracy = compute_accuracy(
+            np.array(results["labels"]), np.array(results["preds"])
+        )
+        average_loss = total_loss / len(self.val_loader)
+
+        self.summary_writer.add_scalars(
+                "accuracy",
+                {"test": accuracy},
+                self.step
+        )
+        self.summary_writer.add_scalars(
+                "loss",
+                {"test": average_loss},
+                self.step
+        )
+        print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
+
+
+def compute_accuracy(
+    labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
+) -> float:
+    """
+    Args:
+        labels: ``(batch_size, class_count)`` tensor or array containing example labels
+        preds: ``(batch_size, class_count)`` tensor or array containing model prediction
+    """
+    assert len(labels) == len(preds)
+    return float((labels == preds).sum()) / len(labels)
+
+
+def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
+    """Get a unique directory that hasn't been logged to before for use with a TB
+    SummaryWriter.
+
+    Args:
+        args: CLI Arguments
+
+    Returns:
+        Subdirectory of log_dir with unique subdirectory name to prevent multiple runs
+        from getting logged to the same TB log directory (which you can't easily
+        untangle in TB).
+    """
+    tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_run_'
+    # tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_run_'
+    i = 0
+    while i < 1000:
+        tb_log_dir = args.log_dir / (tb_log_dir_prefix + str(i))
+        if not tb_log_dir.exists():
+            return str(tb_log_dir)
+        i += 1
+    return str(tb_log_dir)
+
+
+
+
+
 
 if __name__ == "__main__":
-    test_forward()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset_root",
+        type=pathlib.Path,
+        default=pathlib.Path("./dataset/"),
+        help="Path to root directory of dataset.",
+    )
+    parser.add_argument(
+        "--log_dir",
+        type=pathlib.Path,
+        default=pathlib.Path("./logs/siamese_CNN/"),
+        help="Path to directory where TensorBoard logs should be written.",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=8,
+        help="Batch size for training and evaluation.",
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-4,
+        help="Learning rate for optimizer.",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=15,
+        help="Number of training epochs.",
+    )
+    parser.add_argument(
+        "--worker_count",
+        type=int,
+        default=cpu_count(),
+        help="Number of worker processes for data loading.",
+    )
+    parser.add_argument(
+        "--val_frequency",
+        type=int,
+        default=1,
+        help="Frequency (in epochs) of validation during training.",
+    )
+    parser.add_argument(
+        "--print_frequency",
+        type=int,
+        default=20,
+        help="Frequency (in steps) of printing training metrics.",
+    )
+    parser.add_argument(
+        "--log_frequency",
+        type=int,
+        default=5,
+        help="Frequency (in steps) of logging training metrics to TensorBoard.",
+    )
+    args = parser.parse_args()
+
+    main(args)
