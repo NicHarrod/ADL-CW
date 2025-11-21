@@ -259,6 +259,7 @@ def test_forward():
     output = model(sample_inputs)
     # print(output.shape)
 def main(args):
+    torch.backends.cudnn.benchmark = True
     transform = transforms.ToTensor()
     """
         Initialize the ProgressionDataset.
@@ -281,12 +282,13 @@ def main(args):
         """
 
 
-
-
-    transform = transforms.ToTensor()
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor()
+    ])
 
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train",epoch_size=args.epochs*50, recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train",epoch_size=5000, recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
         root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test", label_file=str(args.dataset_root / "test_labels.txt")
@@ -318,7 +320,7 @@ def main(args):
         pin_memory=True,
     )
 
-    model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
+    model = SiameseCNN(height=224, width=224, channels=3, class_count=3)
 
     criterion = nn.CrossEntropyLoss()
 
@@ -574,7 +576,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=8,
+        default=32,
         help="Batch size for training and evaluation.",
     )
     parser.add_argument(
@@ -586,7 +588,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--epochs",
         type=int,
-        default=15,
+        default=20,
         help="Number of training epochs.",
     )
     parser.add_argument(
