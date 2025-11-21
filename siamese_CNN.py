@@ -36,6 +36,8 @@ class SiameseCNN(nn.Module):
         self.input_shape = ImageShape(height=height, width=width, channels=channels)
         self.class_count = class_count
 
+        print(f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes.")
+
 
 
         # convolutional layers:
