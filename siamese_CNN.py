@@ -45,21 +45,11 @@ class SiameseCNN(nn.Module):
 
         # first conv layer pair:
         
-        self.conv_1_0 = nn.Conv2d(
-            in_channels=self.input_shape.channels,
-            out_channels=64,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv_1_0 = nn.Conv2d(in_channels=self.input_shape.channels,out_channels=64,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm_1_0 = nn.BatchNorm2d(64)
         self.initialise_layer(self.conv_1_0)
 
-        self.conv_1_1 = nn.Conv2d(
-            in_channels=64,
-            out_channels=64,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv_1_1 = nn.Conv2d(in_channels=64,out_channels=64,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm_1_1 = nn.BatchNorm2d(64)
         self.initialise_layer(self.conv_1_1)
 
@@ -67,22 +57,11 @@ class SiameseCNN(nn.Module):
 
         # second conv layer pair:
 
-
-        self.conv2_0 = nn.Conv2d(
-            in_channels=64,
-            out_channels=128,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv2_0 = nn.Conv2d(in_channels=64,out_channels=128,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm2_0 = nn.BatchNorm2d(128)
         self.initialise_layer(self.conv2_0)
 
-        self.conv2_1 = nn.Conv2d(
-            in_channels=128,
-            out_channels=128,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv2_1 = nn.Conv2d(in_channels=128,out_channels=128,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm2_1 = nn.BatchNorm2d(128)
         self.initialise_layer(self.conv2_1)
 
@@ -90,55 +69,25 @@ class SiameseCNN(nn.Module):
         
         # third conv layer pair:
 
-        self.conv3_0 = nn.Conv2d(
-            in_channels=128,
-            out_channels=256,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv3_0 = nn.Conv2d(in_channels=128,out_channels=256,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm3_0 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_0)
 
-        self.conv3_1 = nn.Conv2d(
-            in_channels=256,
-            out_channels=256,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv3_1 = nn.Conv2d(in_channels=256,out_channels=256,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm3_1 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_1)
         self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
         # fourth conv layer pair:
 
-        self.conv4_0 = nn.Conv2d(
-            in_channels=256,
-            out_channels=512,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv4_0 = nn.Conv2d(in_channels=256,out_channels=512,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm4_0 = nn.BatchNorm2d(512)
         self.initialise_layer(self.conv4_0)
 
-        self.conv4_1 = nn.Conv2d(
-            in_channels=512,
-            out_channels=512,
-            kernel_size=(3, 3),
-            padding=(1, 1),
-        )
+        self.conv4_1 = nn.Conv2d(in_channels=512,out_channels=512,kernel_size=(3, 3),padding=(1, 1),)
         self.batch_norm4_1 = nn.BatchNorm2d(512)
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -148,17 +97,9 @@ class SiameseCNN(nn.Module):
         self.gap = nn.AdaptiveAvgPool2d((1,1))
 
         # first FC layer
-        self.fc1 = nn.Sequential (
-            nn.Linear (1024, 512),
-            nn.ReLU()
-        )
-
-        # second FC Layer: 512 -> 3 with dropout (p = 0.5)
-        self.fc2 = nn.Sequential (
-            nn.Dropout (p = 0.5),
-            nn.Linear (512,3)
-        )
-
+        self.fc1 = nn.Linear (1024, 512)
+        self.fc2 = nn.Linear (512,3)
+        self.dropout = nn.Dropout(p=0.5)
 
 
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
@@ -197,10 +138,6 @@ class SiameseCNN(nn.Module):
             x = self.convForward(image)
             conv_outputs.append(x)
         
-        
-
-        # 
-        # 
 
         # concatenate the outputs to give 1x1x1024 - here x and y are results of convolution at layer 7 and 8 
         feat_map_1 = self.gap (conv_outputs[0])
@@ -212,24 +149,12 @@ class SiameseCNN(nn.Module):
 
         concatenated_features = torch.cat ((flat_feat_map_1, flat_feat_map_2), dim=1)
         # print (f"concatenated shape: {concatenated_features.shape}")
-
-        # FC layer 1 
-        fc_output = self.fc1 (concatenated_features)
-
-        # FC layer 2
-        final_output = self.fc2 (fc_output)
-
-        
-
-        # 
-        # 
-        # 
-        # do fully connected layers
-        
-
-
+        # Pass through fully connected layers with ReLU and dropout
+        x = F.relu(self.fc1(concatenated_features))
+        x = self.dropout(x)
+        output = self.fc2(x)
     
-        return final_output
+        return output
     
 
     @staticmethod
@@ -260,7 +185,6 @@ def test_forward():
     # print(output.shape)
 def main(args):
     torch.backends.cudnn.benchmark = True
-    transform = transforms.ToTensor()
     """
         Initialize the ProgressionDataset.
 
@@ -288,14 +212,14 @@ def main(args):
     ])
 
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train",epoch_size=5000, recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 500,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test", label_file=str(args.dataset_root / "test_labels.txt")
+        root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
     )
 
     val_dataset = ProgressionDataset(   
-        root_dir=os.path.join(args.dataset_root, "val"), transform=transform, mode="val", label_file=str(args.dataset_root / "val_labels.txt")
+        root_dir=os.path.join(args.dataset_root, "val"), transform=transform, mode="val",  label_file=str(args.dataset_root / "val_labels.txt")
     )
 
     train_loader = torch.utils.data.DataLoader(
@@ -393,7 +317,6 @@ class Trainer:
                 logits = self.model.forward(batch)
                 # print(logits.shape)
              
-
 
                 loss = self.criterion(logits,labels)
 
@@ -588,7 +511,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--epochs",
         type=int,
-        default=20,
+        default=30,
         help="Number of training epochs.",
     )
     parser.add_argument(

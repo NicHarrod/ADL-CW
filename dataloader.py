@@ -173,53 +173,6 @@ class ProgressionDataset(Dataset):
     
         return img_a_path, img_b_path, label
 
-    def _generate_pair(self):
-        """
-        Randomly generate a training pair and its label.
-
-        Returns
-        -------
-        tuple
-            (img_a_path, img_b_path, label)
-            where:
-              - label = 0 for forward pairs (i,j) where j > 1
-              - label = 1 for reverse pairs (i,j) where j < 1)
-              - label = 2 for unrelated pairs (different recipes)
-        """
-        pair_type = random.choices([0, 1, 2], weights=[0.4, 0.4, 0.2], k=1)[0] # label mapping -> 0: forward, 1: reverse, 2: unrelated pair
-        
-        # Unrelated pair: select two random images from different recipes
-        if pair_type == 2:
-            recipe_id_a, recipe_id_b = random.sample(self.recipe_ids, 2)
-            img_a_path = random.choice(self.recipes[recipe_id_a])
-            img_b_path = random.choice(self.recipes[recipe_id_b])
-            label = 2
-        else:
-            # Select a random recipe
-            recipe_id = random.choice(self.recipe_ids)
-            steps = self.recipes[recipe_id]
-            
-            if pair_type == 0:
-                start_idx = random.randint(0, len(steps) - 2)
-                img_a_path = steps[start_idx]
-                img_b_path = steps[start_idx + 1]
-                label = 0
-            else:
-                if len(steps) < 3:
-                    start_idx = 0
-                    img_a_path = steps[start_idx]
-                    img_b_path = steps[start_idx + 1]
-                    label = 0
-                else:
-                    idx_a, idx_b = random.sample(range(len(steps)), 2)
-                    while abs(idx_a - idx_b) == 1:
-                        idx_a, idx_b = random.sample(range(len(steps)), 2)
-                    if idx_a > idx_b: idx_a, idx_b = idx_b, idx_a
-                    img_a_path = steps[idx_a]
-                    img_b_path = steps[idx_b]
-                    label = 1
-                    
-        return img_a_path, img_b_path, label
 
     def __len__(self):
         """
