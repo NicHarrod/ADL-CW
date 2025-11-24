@@ -259,7 +259,7 @@ def main(args):
             flush_secs=5
     )
     trainer = Trainer(
-        model, train_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
+        model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
     )
 
     trainer.train(
@@ -270,9 +270,7 @@ def main(args):
     )
 
     summary_writer.close()
-
-
-
+    trainer.test()
 
 
 
@@ -282,6 +280,7 @@ class Trainer:
         model: nn.Module,
         train_loader: DataLoader,
         val_loader: DataLoader,
+        test_loader: DataLoader,
         criterion: nn.Module,
         optimizer: Optimizer,
         summary_writer: SummaryWriter,
@@ -291,6 +290,7 @@ class Trainer:
         self.device = device
         self.train_loader = train_loader
         self.val_loader = val_loader
+        self.test_loader = test_loader
         self.criterion = criterion
         self.optimizer = optimizer
         self.summary_writer = summary_writer
@@ -444,6 +444,43 @@ class Trainer:
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
+    def test(self):
+        """
+        Evaluates the model on the final, unseen test dataset and prints the results.
+        """
+        results = {"preds": [], "labels": []}
+        total_loss = 0
+        # Set the model to evaluation mode
+        self.model.eval()
+
+        # Disable gradient calculations
+        with torch.no_grad():
+            # Use the dedicated test_loader for final evaluation
+            for img_a, img_b, labels in self.test_loader:
+                batch = [img_a, img_b]
+                batch = [b.to(self.device) for b in batch]
+                labels = labels.to(self.device)
+                
+                # Forward pass
+                logits = self.model(batch)
+                loss = self.criterion(logits, labels)
+                total_loss += loss.item()
+                
+                # Get predictions
+                preds = logits.argmax(dim=-1).cpu().numpy()
+                results["preds"].extend(list(preds))
+                results["labels"].extend(list(labels.cpu().numpy()))
+
+        # Calculate final metrics
+        accuracy = compute_accuracy(
+            np.array(results["labels"]), np.array(results["preds"])
+        )
+        average_loss = total_loss / len(self.test_loader)
+
+        print("\n" + "---" * 20)
+        print(f"✨ **FINAL TEST RESULTS** ✨")
+        print(f"Test Loss: {average_loss:.5f}, Test Accuracy: {accuracy * 100:2.2f}%")
+        print("---" * 20 + "\n")
 
 def compute_accuracy(
     labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
@@ -507,13 +544,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=3e-4,
+        default=1e-4,
         help="Learning rate for optimizer.",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=60,
+        default=30,
         help="Number of training epochs.",
     )
     parser.add_argument(
