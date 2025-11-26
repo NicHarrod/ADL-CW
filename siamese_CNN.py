@@ -230,7 +230,7 @@ def main(args):
     ])
 
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 1500,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
         root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
@@ -562,7 +562,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=2e-4,
+        default=2.5e-4,
         help="Learning rate for optimizer.",
     )
     parser.add_argument(
