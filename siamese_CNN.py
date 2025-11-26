@@ -16,6 +16,22 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 import argparse
 import pathlib
+import random 
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        # For reproducibility, though it can slow down training
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+# Call this at the start of main
+SEED = 42 # You can choose any integer
+set_seed(SEED)
 
 
 class ImageShape(NamedTuple):
@@ -214,7 +230,7 @@ def main(args):
     ])
 
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 1000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 1500,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
         root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
@@ -252,12 +268,14 @@ def main(args):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
+    
     log_dir = get_summary_writer_log_dir(args)
     print(f"Writing logs to {log_dir}")
     summary_writer = SummaryWriter(
             str(log_dir),
             flush_secs=5
     )
+
     trainer = Trainer(
         model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
     )
@@ -269,7 +287,7 @@ def main(args):
         log_frequency=args.log_frequency,
     )
 
-    summary_writer.close()
+    #summary_writer.close()
     trainer.test()
 
 
@@ -332,6 +350,7 @@ class Trainer:
 
                 data_load_time = data_load_end_time - data_load_start_time
                 step_time = time.time() - data_load_end_time
+
                 if ((self.step + 1) % log_frequency) == 0:
                     self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
                 if ((self.step + 1) % print_frequency) == 0:
@@ -475,11 +494,10 @@ class Trainer:
         accuracy = compute_accuracy(
             np.array(results["labels"]), np.array(results["preds"])
         )
-        average_loss = total_loss / len(self.test_loader)
 
         print("\n" + "---" * 20)
-        print(f"✨ **FINAL TEST RESULTS** ✨")
-        print(f"Test Loss: {average_loss:.5f}, Test Accuracy: {accuracy * 100:2.2f}%")
+        print(f"FINAL TEST RESULTS")
+        print(f"Test Accuracy: {accuracy * 100:2.2f}%")
         print("---" * 20 + "\n")
 
 def compute_accuracy(
@@ -507,7 +525,7 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
         untangle in TB).
     """
     tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_run_'
-    # tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_run_'
+    tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_run_'
     i = 0
     while i < 1000:
         tb_log_dir = args.log_dir / (tb_log_dir_prefix + str(i))
@@ -544,13 +562,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-4,
+        default=2e-4,
         help="Learning rate for optimizer.",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=30,
+        default=50,
         help="Number of training epochs.",
     )
     parser.add_argument(
