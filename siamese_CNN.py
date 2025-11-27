@@ -107,7 +107,7 @@ class SiameseCNN(nn.Module):
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-
+        self.dropout1 = nn.Dropout2d(p=0.5)
 
         # fully connected layers:
               
@@ -140,6 +140,7 @@ class SiameseCNN(nn.Module):
         x= F.relu(self.batch_norm4_0(self.conv4_0(x)))
         x= F.relu(self.batch_norm4_1(self.conv4_1(x)))
         x= self.pool4(x)
+        x = self.dropout1(x)
         
 
         return x
@@ -166,6 +167,7 @@ class SiameseCNN(nn.Module):
         flat_feat_map_2 = feat_map_2.flatten(start_dim=1)
 
         concatenated_features = torch.cat ((flat_feat_map_1, flat_feat_map_2), dim=1)
+        x = self.dropout(concatenated_features)
         # print (f"concatenated shape: {concatenated_features.shape}")
         # Pass through fully connected layers with ReLU and dropout
         x = F.relu(self.fc1(concatenated_features))
@@ -358,37 +360,6 @@ class Trainer:
 
                 self.step += 1
                 data_load_start_time = time.time()
-            # for batch, labels in self.train_loader:
-            #     batch = batch.to(self.device)
-            #     labels = labels.to(self.device)
-            #     data_load_end_time = time.time()
-
-
-
-            #     logits = self.model.forward(batch)
-            #     print(logits.shape)
-             
-
-
-            #     loss = self.criterion(logits,labels)
-
-            #     loss.backward()
-
-            #     self.optimizer.step()
-            #     self.optimizer.zero_grad()
-            #     with torch.no_grad():
-            #         preds = logits.argmax(-1)
-            #         accuracy = compute_accuracy(labels, preds)
-
-            #     data_load_time = data_load_end_time - data_load_start_time
-            #     step_time = time.time() - data_load_end_time
-            #     if ((self.step + 1) % log_frequency) == 0:
-            #         self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
-            #     if ((self.step + 1) % print_frequency) == 0:
-            #         self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
-
-            #     self.step += 1
-            #     data_load_start_time = time.time()
 
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0:
@@ -568,7 +539,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50,
+        default=60,
         help="Number of training epochs.",
     )
     parser.add_argument(
