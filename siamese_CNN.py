@@ -226,7 +226,7 @@ def main(args):
 
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
-        transforms.ToTensor()
+        transforms.ToTensor(),
     ])
 
     train_dataset = ProgressionDataset(
