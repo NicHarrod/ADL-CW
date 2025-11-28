@@ -46,6 +46,9 @@ else:
     DEVICE = torch.device("cpu")
 
 
+
+
+
 class SiameseCNN(nn.Module):
     def __init__(self, height: int, width: int, channels: int, class_count: int):
         super().__init__()
@@ -119,7 +122,15 @@ class SiameseCNN(nn.Module):
         self.fc2 = nn.Linear (512,3)
         self.dropout = nn.Dropout(p=0.5)
 
-
+    def embed(self, image):
+        x = self.convForward(image)
+        x = self.gap(x)
+        x = x.flatten(start_dim=1)
+        # --- ADD THIS LINE ---
+        # Normalize features to unit length so Euclidean distance is meaningful
+        x = F.normalize(x, p=2, dim=1) 
+        # ---------------------
+        return x
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
         
         x = F.relu(self.batch_norm_1_0(self.conv_1_0(x)))
@@ -150,31 +161,17 @@ class SiameseCNN(nn.Module):
     def forward(self, images: torch.Tensor) -> torch.Tensor:
 
 
-        # do conv for each image in the pair
-        conv_outputs = []
-        # [anchor,comparator]
-        for image in images:
-            x = self.convForward(image)
-            conv_outputs.append(x)
-        
+        feat1 = self.embed(images[0])
+        feat2 = self.embed(images[1])
 
-        # concatenate the outputs to give 1x1x1024 - here x and y are results of convolution at layer 7 and 8 
-        feat_map_1 = self.gap (conv_outputs[0])
-        feat_map_2 = self.gap (conv_outputs[1])
-
-        # flatten the feature maps to turn (B,512,1,1) into (B,512)
-        flat_feat_map_1 = feat_map_1.flatten(start_dim=1)
-        flat_feat_map_2 = feat_map_2.flatten(start_dim=1)
-
-        concatenated_features = torch.cat ((flat_feat_map_1, flat_feat_map_2), dim=1)
-        x = self.dropout(concatenated_features)
-        # print (f"concatenated shape: {concatenated_features.shape}")
-        # Pass through fully connected layers with ReLU and dropout
-        x = F.relu(self.fc1(concatenated_features))
+        # concatenate for classification
+        concatenated = torch.cat((feat1, feat2), dim=1)
+        x = self.dropout(concatenated)
+        x = F.relu(self.fc1(x))
         x = self.dropout(x)
-        output = self.fc2(x)
-    
-        return output
+        logits = self.fc2(x)
+
+        return logits, feat1, feat2
     
 
     @staticmethod
@@ -292,7 +289,21 @@ def main(args):
     #summary_writer.close()
     trainer.test()
 
+class ContrastiveLoss(nn.Module):
+    def __init__(self, margin=1.0):
+        super().__init__()
+        self.margin = margin
 
+    def forward(self, feat1, feat2, label):
+        # Euclidean distance
+        dist = F.pairwise_distance(feat1, feat2)
+
+        # label = 1 → same recipe → pull together
+        # label = 0 → different recipe → push apart
+        loss = label * dist.pow(2) + \
+               (1 - label) * F.relu(self.margin - dist).pow(2)
+
+        return loss.mean()
 
 class Trainer:
     def __init__(
@@ -315,6 +326,7 @@ class Trainer:
         self.optimizer = optimizer
         self.summary_writer = summary_writer
         self.step = 0
+        self.contrastive_loss = ContrastiveLoss(margin=1.0)
 
     def train(
         self,
@@ -334,13 +346,20 @@ class Trainer:
                 labels = labels.to(self.device)
                 data_load_end_time = time.time()
 
+                lambda_coeff = 0.1
 
+                logits, feat1, feat2 = self.model(batch)
 
-                logits = self.model.forward(batch)
-                # print(logits.shape)
-             
+                # cross entropy
+                ce_loss = self.criterion(logits, labels)
 
-                loss = self.criterion(logits,labels)
+                # contrastive label: same recipe => 1, different recipe => 0
+                sim_label = (labels != 2).float()
+
+                contrast_loss = self.contrastive_loss(feat1, feat2, sim_label)
+
+                loss = ce_loss + lambda_coeff * contrast_loss
+
 
                 loss.backward()
 
@@ -410,8 +429,11 @@ class Trainer:
                 batch = [img_a, img_b]
                 batch = [b.to(self.device) for b in batch]
                 labels = labels.to(self.device)
-                logits = self.model(batch)
-                loss = self.criterion(logits, labels)
+                logits, feat1, feat2 = self.model(batch)
+                ce_loss = self.criterion(logits, labels)
+                sim_label = (labels != 2).float()
+                contrast_loss = self.contrastive_loss(feat1, feat2, sim_label)
+                loss = ce_loss + 0.1 * contrast_loss
                 total_loss += loss.item()
                 preds = logits.argmax(dim=-1).cpu().numpy()
                 results["preds"].extend(list(preds))
@@ -452,8 +474,11 @@ class Trainer:
                 labels = labels.to(self.device)
                 
                 # Forward pass
-                logits = self.model(batch)
-                loss = self.criterion(logits, labels)
+                logits, feat1, feat2 = self.model(batch) 
+                ce_loss = self.criterion(logits, labels)
+                sim_label = (labels != 2).float()
+                contrast_loss = self.contrastive_loss(feat1, feat2, sim_label)
+                loss = ce_loss + 0.1 * contrast_loss
                 total_loss += loss.item()
                 
                 # Get predictions
