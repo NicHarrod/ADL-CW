@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 import argparse
 import pathlib
-import random 
+import random
 
 
 def set_seed(seed):
@@ -29,8 +29,9 @@ def set_seed(seed):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
+
 # Call this at the start of main
-SEED = 42 # You can choose any integer
+SEED = 42  # You can choose any integer
 set_seed(SEED)
 
 
@@ -46,197 +47,176 @@ else:
     DEVICE = torch.device("cpu")
 
 
-
-
-
 class SiameseCNN(nn.Module):
     def __init__(self, height: int, width: int, channels: int, class_count: int):
         super().__init__()
         self.input_shape = ImageShape(height=height, width=width, channels=channels)
         self.class_count = class_count
 
-        print(f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes.")
-
-
+        print(
+            f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes."
+        )
 
         # convolutional layers:
         # ((conv, batch norm) x 2 , pool) x 4
-        # named as conv_(layer number)_(conv number in layer)
-        # and batch_norm_(layer number)_(conv number in layer)
 
         # first conv layer pair:
-        
-        self.conv_1_0 = nn.Conv2d(in_channels=self.input_shape.channels,out_channels=64,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv_1_0 = nn.Conv2d(
+            in_channels=self.input_shape.channels, out_channels=64, kernel_size=(3, 3), padding=(1, 1),
+        )
         self.batch_norm_1_0 = nn.BatchNorm2d(64)
         self.initialise_layer(self.conv_1_0)
 
-        self.conv_1_1 = nn.Conv2d(in_channels=64,out_channels=64,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv_1_1 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm_1_1 = nn.BatchNorm2d(64)
         self.initialise_layer(self.conv_1_1)
 
         self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
         # second conv layer pair:
-
-        self.conv2_0 = nn.Conv2d(in_channels=64,out_channels=128,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv2_0 = nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm2_0 = nn.BatchNorm2d(128)
         self.initialise_layer(self.conv2_0)
 
-        self.conv2_1 = nn.Conv2d(in_channels=128,out_channels=128,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv2_1 = nn.Conv2d(in_channels=128, out_channels=128, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm2_1 = nn.BatchNorm2d(128)
         self.initialise_layer(self.conv2_1)
 
         self.pool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-        
-        # third conv layer pair:
 
-        self.conv3_0 = nn.Conv2d(in_channels=128,out_channels=256,kernel_size=(3, 3),padding=(1, 1),)
+        # third conv layer pair:
+        self.conv3_0 = nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm3_0 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_0)
 
-        self.conv3_1 = nn.Conv2d(in_channels=256,out_channels=256,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv3_1 = nn.Conv2d(in_channels=256, out_channels=256, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm3_1 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_1)
         self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
         # fourth conv layer pair:
-
-        self.conv4_0 = nn.Conv2d(in_channels=256,out_channels=512,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv4_0 = nn.Conv2d(in_channels=256, out_channels=512, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm4_0 = nn.BatchNorm2d(512)
         self.initialise_layer(self.conv4_0)
 
-        self.conv4_1 = nn.Conv2d(in_channels=512,out_channels=512,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv4_1 = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=(3, 3), padding=(1, 1),)
         self.batch_norm4_1 = nn.BatchNorm2d(512)
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
         self.dropout1 = nn.Dropout2d(p=0.5)
 
-        # fully connected layers:
-              
-        # global avg pooling to reduce spatial dimension from 14 x14 to 1 x 1
-        self.gap = nn.AdaptiveAvgPool2d((1,1))
+        # global avg pooling to reduce spatial dimension to 1x1
+        self.gap = nn.AdaptiveAvgPool2d((1, 1))
 
-        # first FC layer
-        self.fc1 = nn.Linear (1024, 512)
-        self.fc2 = nn.Linear (512,3)
+        # first FC layer (after concatenation of two 512-d embeddings -> 1024)
+        self.fc1 = nn.Linear(1024, 512)
         self.dropout = nn.Dropout(p=0.5)
+
+        # output heads
+        self.fc_similarity = nn.Linear(512, 1)  # similarity head (binary)
+        self.fc_class = nn.Linear(512, 2)  # class direction head (0 or 1)
 
     def embed(self, image):
         x = self.convForward(image)
         x = self.gap(x)
         x = x.flatten(start_dim=1)
-        # --- ADD THIS LINE ---
-        # Normalize features to unit length so Euclidean distance is meaningful
-        x = F.normalize(x, p=2, dim=1) 
-        # ---------------------
+        # L2 normalization
+        x = F.normalize(x, p=2, dim=1)
+
         return x
+
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
-        
         x = F.relu(self.batch_norm_1_0(self.conv_1_0(x)))
-        x = F.relu(self.batch_norm_1_1(self.conv_1_1(x))) 
-        x= self.pool1(x)  
-        
+        x = F.relu(self.batch_norm_1_1(self.conv_1_1(x)))
+        x = self.pool1(x)
 
-        x= F.relu(self.batch_norm2_0(self.conv2_0(x)))
-        x= F.relu(self.batch_norm2_1(self.conv2_1(x)))
-        x= self.pool2(x)   
-        
+        x = F.relu(self.batch_norm2_0(self.conv2_0(x)))
+        x = F.relu(self.batch_norm2_1(self.conv2_1(x)))
+        x = self.pool2(x)
 
-        x= F.relu(self.batch_norm3_0(self.conv3_0(x)))
-        x= F.relu(self.batch_norm3_1(self.conv3_1(x)))
-        x= self.pool3(x)
-        
+        x = F.relu(self.batch_norm3_0(self.conv3_0(x)))
+        x = F.relu(self.batch_norm3_1(self.conv3_1(x)))
+        x = self.pool3(x)
 
-        x= F.relu(self.batch_norm4_0(self.conv4_0(x)))
-        x= F.relu(self.batch_norm4_1(self.conv4_1(x)))
-        x= self.pool4(x)
+        x = F.relu(self.batch_norm4_0(self.conv4_0(x)))
+        x = F.relu(self.batch_norm4_1(self.conv4_1(x)))
+        x = self.pool4(x)
         x = self.dropout1(x)
-        
 
         return x
-
-
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
-
-
+        """
+        images: list or tuple [img_a_batch, img_b_batch]
+        returns: similarity_logit (B,1), class_logits (B,2), feat1 (B,512), feat2 (B,512)
+        """
         feat1 = self.embed(images[0])
         feat2 = self.embed(images[1])
 
         # concatenate for classification
-        concatenated = torch.cat((feat1, feat2), dim=1)
+        concatenated = torch.cat((feat1, feat2), dim=1)  # shape (B, 1024)
         x = self.dropout(concatenated)
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
-        logits = self.fc2(x)
 
-        return logits, feat1, feat2
-    
+        # Head 1: similarity (binary)
+        similarity_logit = self.fc_similarity(x)  # (B,1)
+        # Head 2: class direction (0 or 1 only)
+        class_logits = self.fc_class(x)  # (B,2)
+        return similarity_logit, class_logits, feat1, feat2
 
     @staticmethod
     def initialise_layer(layer):
-        if hasattr(layer, "bias"):
+        if hasattr(layer, "bias") and layer.bias is not None:
             nn.init.zeros_(layer.bias)
-        if hasattr(layer, "weight"):
+        if hasattr(layer, "weight") and layer.weight is not None:
             nn.init.kaiming_normal_(layer.weight)
 
 
 def test_CNN():
     model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
-    # generate 2 batches of 1 image each
     sample_inputs = [torch.randn(1, 3, 512, 512), torch.randn(1, 3, 512, 512)]
-    # resize inputs to 224x224 using transforms
     resize = transforms.Resize((224, 224))
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
+
 
 def test_forward():
     model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
-    # generate 2 batches of 1 image each
     sample_inputs = [torch.randn(1, 3, 512, 512), torch.randn(1, 3, 512, 512)]
-    # resize inputs to 224x224 using transforms
     resize = transforms.Resize((224, 224))
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
-    # print(output.shape)
+
+
 def main(args):
     torch.backends.cudnn.benchmark = True
     """
-        Initialize the ProgressionDataset.
+    Initialize the ProgressionDataset.
+    """
 
-        Parameters
-        ----------
-        root_dir : str
-            Root directory containing recipe folders or image pairs.
-        transform : callable, optional
-            Optional torchvision transform for image preprocessing.
-        mode : str, default='train'
-            Operation mode: 'train', 'val', or 'test'.
-        recipe_ids_list : list of str, optional
-            List of recipe folder names (required for 'train' mode).
-        epoch_size : int, optional
-            Number of samples per epoch (required for 'train' mode).
-        label_file : str, optional
-            Path to text file containing image pair indices and labels 
-            (required for 'val'/'test' mode).
-        """
-
-
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
+    transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),])
 
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"),
+        transform=transform,
+        mode="train",
+        epoch_size=2000,
+        recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")],
     )
     test_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
+        root_dir=os.path.join(args.dataset_root, "test"),
+        transform=transform,
+        mode="test",
+        label_file=str(args.dataset_root / "test_labels.txt"),
     )
 
-    val_dataset = ProgressionDataset(   
-        root_dir=os.path.join(args.dataset_root, "val"), transform=transform, mode="val",  label_file=str(args.dataset_root / "val_labels.txt")
+    val_dataset = ProgressionDataset(
+        root_dir=os.path.join(args.dataset_root, "val"),
+        transform=transform,
+        mode="val",
+        label_file=str(args.dataset_root / "val_labels.txt"),
     )
 
     train_loader = torch.utils.data.DataLoader(
@@ -264,30 +244,24 @@ def main(args):
     model = SiameseCNN(height=224, width=224, channels=3, class_count=3)
 
     criterion = nn.CrossEntropyLoss()
-
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
-    
     log_dir = get_summary_writer_log_dir(args)
     print(f"Writing logs to {log_dir}")
-    summary_writer = SummaryWriter(
-            str(log_dir),
-            flush_secs=5
-    )
+    summary_writer = SummaryWriter(str(log_dir), flush_secs=5)
 
-    trainer = Trainer(
-        model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
-    )
+    trainer = Trainer(model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE)
 
     trainer.train(
         args.epochs,
         args.val_frequency,
         print_frequency=args.print_frequency,
         log_frequency=args.log_frequency,
+        per_class_frequency=args.per_class_frequency,
     )
 
-    #summary_writer.close()
     trainer.test()
+
 
 class ContrastiveLoss(nn.Module):
     def __init__(self, margin=1.0):
@@ -300,10 +274,10 @@ class ContrastiveLoss(nn.Module):
 
         # label = 1 → same recipe → pull together
         # label = 0 → different recipe → push apart
-        loss = label * dist.pow(2) + \
-               (1 - label) * F.relu(self.margin - dist).pow(2)
+        loss = label * dist.pow(2) + (1 - label) * F.relu(self.margin - dist).pow(2)
 
         return loss.mean()
+
 
 class Trainer:
     def __init__(
@@ -322,205 +296,257 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
-        self.criterion = criterion
+        self.ce = criterion                   # CE for class 0/1
         self.optimizer = optimizer
         self.summary_writer = summary_writer
         self.step = 0
-        self.contrastive_loss = ContrastiveLoss(margin=1.0)
 
+        self.bce = nn.BCEWithLogitsLoss()     # BCE for similarity
+
+
+    ############################################################
+    # ------------------------ TRAIN ---------------------------
+    ############################################################
     def train(
         self,
         epochs: int,
         val_frequency: int,
         print_frequency: int = 20,
         log_frequency: int = 5,
-        start_epoch: int = 0
+        start_epoch: int = 0,
+        per_class_frequency: int = 3,
     ):
         self.model.train()
+
         for epoch in range(start_epoch, epochs):
-            self.model.train()
-            data_load_start_time = time.time()
             for img_a, img_b, labels in self.train_loader:
-                batch = [img_a, img_b]
-                batch = [b.to(self.device) for b in batch]
+                batch = [img_a.to(self.device), img_b.to(self.device)]
                 labels = labels.to(self.device)
-                data_load_end_time = time.time()
 
-                lambda_coeff = 0.1
-
-                logits, feat1, feat2 = self.model(batch)
-
-                # cross entropy
-                ce_loss = self.criterion(logits, labels)
-
-                # contrastive label: same recipe => 1, different recipe => 0
+                # similarity label (1 = same, 0 = different)
                 sim_label = (labels != 2).float()
 
-                contrast_loss = self.contrastive_loss(feat1, feat2, sim_label)
+                # ---------------------- Forward ----------------------
+                similarity_logit, class_logits, feat1, feat2 = self.model(batch)
 
-                loss = ce_loss + lambda_coeff * contrast_loss
+                # BCE for same/different
+                sim_loss = self.bce(similarity_logit.squeeze(1), sim_label)
 
+                # CE for class 0/1, only when same
+                same_mask = (labels != 2)
+                if same_mask.sum() > 0:
+                    ce_loss = self.ce(class_logits[same_mask], labels[same_mask])
+                else:
+                    ce_loss = torch.tensor(0.0, device=self.device)
 
-                loss.backward()
+                # ---------------------- Total Loss ----------------------
+                loss = sim_loss + ce_loss
 
-                self.optimizer.step()
+                # ---------------------- Backprop ----------------------
                 self.optimizer.zero_grad()
-                with torch.no_grad():
-                    preds = logits.argmax(-1)
-                    accuracy = compute_accuracy(labels, preds)
+                loss.backward()
+                self.optimizer.step()
 
-                data_load_time = data_load_end_time - data_load_start_time
-                step_time = time.time() - data_load_end_time
+                # ---------------------- Accuracy ----------------------
+                preds = self.compute_multitask_predictions(similarity_logit, class_logits)
+                accuracy = compute_accuracy(labels.cpu(), preds.cpu())
 
-                if ((self.step + 1) % log_frequency) == 0:
-                    self.log_metrics(epoch, accuracy, loss, data_load_time, step_time)
-                if ((self.step + 1) % print_frequency) == 0:
-                    self.print_metrics(epoch, accuracy, loss, data_load_time, step_time)
+                # ---------------------- Logging ------------------------
+                if (self.step + 1) % log_frequency == 0:
+                    self.log_metrics(epoch, accuracy, loss)
+
+                if (self.step + 1) % print_frequency == 0:
+                    print(f"epoch {epoch} | step {self.step} | "
+                          f"loss {loss:.4f} | acc {accuracy*100:.2f}%")
 
                 self.step += 1
-                data_load_start_time = time.time()
 
+            # after epoch
             self.summary_writer.add_scalar("epoch", epoch, self.step)
-            if ((epoch + 1) % val_frequency) == 0:
-                self.validate()
-                # self.validate() will put the model in validation mode,
-                # so we have to switch back to train mode afterwards
-                self.model.train()
 
-    def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
-        epoch_step = self.step % len(self.train_loader)
-        print(
-                f"epoch: [{epoch}], "
-                f"step: [{epoch_step}/{len(self.train_loader)}], "
-                f"batch loss: {loss:.5f}, "
-                f"batch accuracy: {accuracy * 100:2.2f}, "
-                f"data load time: "
-                f"{data_load_time:.5f}, "
-                f"step time: {step_time:.5f}"
-        )
+            if (epoch + 1) % val_frequency == 0:
+                results = self.validate()
 
-    def log_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
-        self.summary_writer.add_scalar("epoch", epoch, self.step)
-        self.summary_writer.add_scalars(
-                "accuracy",
-                {"train": accuracy},
-                self.step
-        )
-        self.summary_writer.add_scalars(
-                "loss",
-                {"train": float(loss.item())},
-                self.step
-        )
-        self.summary_writer.add_scalar(
-                "time/data", data_load_time, self.step
-        )
-        self.summary_writer.add_scalar(
-                "time/data", step_time, self.step
-        )
+                if ((epoch + 1) % per_class_frequency) == 0:
+                    labels_tensor = torch.tensor(results["labels"])
+                    preds_tensor = torch.tensor(results["preds"])
+                    print_per_class_accuracy(labels_tensor, preds_tensor, self.model.class_count)
 
+
+
+    ############################################################
+    # ---------------------- PREDICTION ------------------------
+    ############################################################
+    def compute_multitask_predictions(self, sim_logit, class_logits):
+        """
+        sim < 0.5 → class 2
+        sim ≥ 0.5 → choose 0/1 by CE head
+        """
+        sim_prob = torch.sigmoid(sim_logit).squeeze(1)
+        preds = torch.zeros_like(sim_prob, dtype=torch.long)
+
+        # different
+        diff_mask = sim_prob < 0.5
+        preds[diff_mask] = 2
+
+        # same → class 0/1
+        same_mask = sim_prob >= 0.5
+        preds[same_mask] = class_logits[same_mask].argmax(dim=1)
+
+        return preds
+
+
+    ############################################################
+    # ----------------------- VALIDATE -------------------------
+    ############################################################
     def validate(self):
-        results = {"preds": [], "labels": []}
-        total_loss = 0
         self.model.eval()
+        results = {"labels": [], "preds": []}
 
-        # No need to track gradients for validation, we're not optimizing.
+        total_loss = 0
         with torch.no_grad():
             for img_a, img_b, labels in self.val_loader:
-                batch = [img_a, img_b]
-                batch = [b.to(self.device) for b in batch]
+                batch = [img_a.to(self.device), img_b.to(self.device)]
                 labels = labels.to(self.device)
-                logits, feat1, feat2 = self.model(batch)
-                ce_loss = self.criterion(logits, labels)
+
                 sim_label = (labels != 2).float()
-                contrast_loss = self.contrastive_loss(feat1, feat2, sim_label)
-                loss = ce_loss + 0.1 * contrast_loss
+
+                similarity_logit, class_logits, _, _ = self.model(batch)
+
+                sim_loss = self.bce(similarity_logit.squeeze(1), sim_label)
+
+                # CE for class 0/1 only
+                same_mask = (labels != 2)
+                if same_mask.sum() > 0:
+                    ce_loss = self.ce(class_logits[same_mask], labels[same_mask])
+                else:
+                    ce_loss = torch.tensor(0.0, device=self.device)
+
+                loss = sim_loss + ce_loss
                 total_loss += loss.item()
-                preds = logits.argmax(dim=-1).cpu().numpy()
-                results["preds"].extend(list(preds))
-                results["labels"].extend(list(labels.cpu().numpy()))
 
-        accuracy = compute_accuracy(
-            np.array(results["labels"]), np.array(results["preds"])
-        )
-        average_loss = total_loss / len(self.val_loader)
+                preds = self.compute_multitask_predictions(similarity_logit, class_logits)
 
-        self.summary_writer.add_scalars(
-                "accuracy",
-                {"test": accuracy},
-                self.step
-        )
-        self.summary_writer.add_scalars(
-                "loss",
-                {"test": average_loss},
-                self.step
-        )
-        print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
+                results["labels"].extend(labels.cpu().numpy())
+                results["preds"].extend(preds.cpu().numpy())
 
+        acc = compute_accuracy(np.array(results["labels"]), np.array(results["preds"]))
+        avg_loss = total_loss / len(self.val_loader)
+
+        self.summary_writer.add_scalars("accuracy", {"test": acc}, self.step)
+        self.summary_writer.add_scalars("loss", {"test": avg_loss}, self.step)
+
+        print(f"[VAL] Loss: {avg_loss:.4f} | Acc: {acc*100:.2f}%")
+
+        self.model.train()
+        return results
+
+
+    ############################################################
+    # ------------------------- TEST ---------------------------
+    ############################################################
     def test(self):
-        """
-        Evaluates the model on the final, unseen test dataset and prints the results.
-        """
-        results = {"preds": [], "labels": []}
-        total_loss = 0
-        # Set the model to evaluation mode
         self.model.eval()
+        results = {"labels": [], "preds": []}
+        total_loss = 0
 
-        # Disable gradient calculations
         with torch.no_grad():
-            # Use the dedicated test_loader for final evaluation
             for img_a, img_b, labels in self.test_loader:
-                batch = [img_a, img_b]
-                batch = [b.to(self.device) for b in batch]
+                batch = [img_a.to(self.device), img_b.to(self.device)]
                 labels = labels.to(self.device)
-                
-                # Forward pass
-                logits, feat1, feat2 = self.model(batch) 
-                ce_loss = self.criterion(logits, labels)
+
                 sim_label = (labels != 2).float()
-                contrast_loss = self.contrastive_loss(feat1, feat2, sim_label)
-                loss = ce_loss + 0.1 * contrast_loss
+
+                similarity_logit, class_logits, _, _ = self.model(batch)
+                sim_loss = self.bce(similarity_logit.squeeze(1), sim_label)
+
+                same_mask = (labels != 2)
+                if same_mask.sum() > 0:
+                    ce_loss = self.ce(class_logits[same_mask], labels[same_mask])
+                else:
+                    ce_loss = torch.tensor(0.0, device=self.device)
+
+                loss = sim_loss + ce_loss
                 total_loss += loss.item()
-                
-                # Get predictions
-                preds = logits.argmax(dim=-1).cpu().numpy()
-                results["preds"].extend(list(preds))
-                results["labels"].extend(list(labels.cpu().numpy()))
 
-        # Calculate final metrics
-        accuracy = compute_accuracy(
-            np.array(results["labels"]), np.array(results["preds"])
-        )
+                preds = self.compute_multitask_predictions(similarity_logit, class_logits)
 
-        print("\n" + "---" * 20)
-        print(f"FINAL TEST RESULTS")
-        print(f"Test Accuracy: {accuracy * 100:2.2f}%")
-        print("---" * 20 + "\n")
+                results["labels"].extend(labels.cpu().numpy())
+                results["preds"].extend(preds.cpu().numpy())
 
-def compute_accuracy(
-    labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
-) -> float:
+        acc = compute_accuracy(np.array(results["labels"]), np.array(results["preds"]))
+        avg_loss = total_loss / len(self.test_loader)
+
+        print("\n===== FINAL TEST =====")
+        print(f"Loss: {avg_loss:.4f}")
+        print(f"Accuracy: {acc*100:.2f}%")
+        print("======================\n")
+
+
+    ############################################################
+    # -------------------------- LOG ---------------------------
+    ############################################################
+    def log_metrics(self, epoch, acc, loss):
+        self.summary_writer.add_scalar("epoch", epoch, self.step)
+        self.summary_writer.add_scalar("loss/train", loss.item(), self.step)
+        self.summary_writer.add_scalar("accuracy/train", acc, self.step)
+
+def compute_accuracy(labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]) -> float:
     """
     Args:
-        labels: ``(batch_size, class_count)`` tensor or array containing example labels
-        preds: ``(batch_size, class_count)`` tensor or array containing model prediction
+        labels: ``(batch_size,)`` tensor or array containing example labels
+        preds: ``(batch_size,)`` tensor or array containing model prediction
     """
+    if isinstance(labels, torch.Tensor):
+        labels = labels.cpu().numpy()
+    if isinstance(preds, torch.Tensor):
+        preds = preds.cpu().numpy()
     assert len(labels) == len(preds)
     return float((labels == preds).sum()) / len(labels)
+
+
+# --- added: per-class accuracy helpers ---
+def compute_per_class_accuracy(labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray], class_count: int) -> dict:
+    """
+    Computes per-class accuracy for each class in a multi-class classification task.
+    Returns a dict mapping class index -> accuracy (0..1).
+    """
+    if isinstance(labels, torch.Tensor):
+        labels_np = labels.cpu().numpy()
+    else:
+        labels_np = np.array(labels)
+    if isinstance(preds, torch.Tensor):
+        preds_np = preds.cpu().numpy()
+    else:
+        preds_np = np.array(preds)
+
+    class_accuracies = {}
+    for class_idx in range(class_count):
+        mask = (labels_np == class_idx)
+        total = mask.sum()
+        if total == 0:
+            class_accuracies[class_idx] = 0.0
+        else:
+            correct = (preds_np[mask] == class_idx).sum()
+            class_accuracies[class_idx] = float(correct) / float(total)
+    return class_accuracies
+
+
+def print_per_class_accuracy(labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray], class_count: int):
+    """
+    Prints per-class accuracy as percentages.
+    """
+    accs = compute_per_class_accuracy(labels, preds, class_count)
+    print("\nPer-class accuracy:")
+    for cls, a in accs.items():
+        print(f"  Class {cls}: {a * 100:5.2f}%")
+# --- end added helpers ---
 
 
 def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
     """Get a unique directory that hasn't been logged to before for use with a TB
     SummaryWriter.
-
-    Args:
-        args: CLI Arguments
-
-    Returns:
-        Subdirectory of log_dir with unique subdirectory name to prevent multiple runs
-        from getting logged to the same TB log directory (which you can't easily
-        untangle in TB).
     """
-    tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_run_'
     tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_run_'
     i = 0
     while i < 1000:
@@ -529,10 +555,6 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
             return str(tb_log_dir)
         i += 1
     return str(tb_log_dir)
-
-
-
-
 
 
 if __name__ == "__main__":
@@ -564,7 +586,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--epochs",
         type=int,
-        default=60,
+        default=30,
         help="Number of training epochs.",
     )
     parser.add_argument(
@@ -590,6 +612,12 @@ if __name__ == "__main__":
         type=int,
         default=5,
         help="Frequency (in steps) of logging training metrics to TensorBoard.",
+    )
+    parser.add_argument(
+        "--per_class_frequency",
+        type=int,
+        default=3,
+        help="Frequency (in epochs) to print per-class accuracy during training/validation.",
     )
     args = parser.parse_args()
 
