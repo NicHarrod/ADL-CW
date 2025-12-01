@@ -17,6 +17,8 @@ from torchvision import transforms
 import argparse
 import pathlib
 import random 
+from sklearn.metrics import confusion_matrix
+
 
 
 def set_seed(seed):
@@ -51,7 +53,7 @@ class SiameseCNN(nn.Module):
         super().__init__()
         self.input_shape = ImageShape(height=height, width=width, channels=channels)
         self.class_count = class_count
-
+        
         print(f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes.")
 
 
@@ -107,7 +109,7 @@ class SiameseCNN(nn.Module):
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-        self.dropout1 = nn.Dropout2d(p=0.5)
+
 
         # fully connected layers:
               
@@ -119,18 +121,17 @@ class SiameseCNN(nn.Module):
         self.fc2 = nn.Linear (512,3)
         self.dropout = nn.Dropout(p=0.5)
 
-
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
         
         x = F.relu(self.batch_norm_1_0(self.conv_1_0(x)))
         x = F.relu(self.batch_norm_1_1(self.conv_1_1(x))) 
         x= self.pool1(x)  
-        
+
 
         x= F.relu(self.batch_norm2_0(self.conv2_0(x)))
         x= F.relu(self.batch_norm2_1(self.conv2_1(x)))
         x= self.pool2(x)   
-        
+
 
         x= F.relu(self.batch_norm3_0(self.conv3_0(x)))
         x= F.relu(self.batch_norm3_1(self.conv3_1(x)))
@@ -140,7 +141,7 @@ class SiameseCNN(nn.Module):
         x= F.relu(self.batch_norm4_0(self.conv4_0(x)))
         x= F.relu(self.batch_norm4_1(self.conv4_1(x)))
         x= self.pool4(x)
-        x = self.dropout1(x)
+
         
 
         return x
@@ -167,7 +168,7 @@ class SiameseCNN(nn.Module):
         flat_feat_map_2 = feat_map_2.flatten(start_dim=1)
 
         concatenated_features = torch.cat ((flat_feat_map_1, flat_feat_map_2), dim=1)
-        x = self.dropout(concatenated_features)
+        # x = self.dropout(concatenated_features)
         # print (f"concatenated shape: {concatenated_features.shape}")
         # Pass through fully connected layers with ReLU and dropout
         x = F.relu(self.fc1(concatenated_features))
@@ -268,7 +269,7 @@ def main(args):
 
     criterion = nn.CrossEntropyLoss()
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     
     log_dir = get_summary_writer_log_dir(args)
@@ -364,9 +365,32 @@ class Trainer:
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0:
                 self.validate()
+
+                if ((epoch + 1) % 5) == 0:
+                    self.compute_and_print_confusion_matrix(self.val_loader, split_name="val")
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
                 self.model.train()
+    def compute_and_print_confusion_matrix(self, loader, split_name="val"):
+        self.model.eval()
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for img_a, img_b, labels in loader:
+                batch = [img_a.to(self.device), img_b.to(self.device)]
+                labels = labels.to(self.device)
+
+                logits = self.model(batch)
+                preds = logits.argmax(dim=-1)
+
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        cm = confusion_matrix(all_labels, all_preds)
+        print(f"\nConfusion Matrix ({split_name}):")
+        print(cm)
+
 
     def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
         epoch_step = self.step % len(self.train_loader)
@@ -424,12 +448,12 @@ class Trainer:
 
         self.summary_writer.add_scalars(
                 "accuracy",
-                {"test": accuracy},
+                {"validation": accuracy},
                 self.step
         )
         self.summary_writer.add_scalars(
                 "loss",
-                {"test": average_loss},
+                {"validation": average_loss},
                 self.step
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
@@ -495,8 +519,8 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
         from getting logged to the same TB log directory (which you can't easily
         untangle in TB).
     """
-    tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_run_'
-    tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_run_'
+    tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
+    tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
     i = 0
     while i < 1000:
         tb_log_dir = args.log_dir / (tb_log_dir_prefix + str(i))
@@ -533,13 +557,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=2.5e-4,
+        default=1e-5,
         help="Learning rate for optimizer.",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=60,
+        default=30,
         help="Number of training epochs.",
     )
     parser.add_argument(
@@ -565,6 +589,12 @@ if __name__ == "__main__":
         type=int,
         default=5,
         help="Frequency (in steps) of logging training metrics to TensorBoard.",
+    )
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=1e-4,
+        help="Weight decay (L2 penalty) for optimizer.",
     )
     args = parser.parse_args()
 
