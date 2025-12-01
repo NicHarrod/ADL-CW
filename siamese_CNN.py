@@ -11,7 +11,7 @@ from torch import nn, optim
 from torch.nn import functional as F
 import torchvision.datasets
 from torch.optim.optimizer import Optimizer
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 import argparse
@@ -56,7 +56,7 @@ class SiameseCNN(nn.Module):
         
         print(f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes.")
 
-
+        self.activation = nn.LeakyReLU(negative_slope=0.01)
 
         # convolutional layers:
         # ((conv, batch norm) x 2 , pool) x 4
@@ -93,7 +93,7 @@ class SiameseCNN(nn.Module):
         self.batch_norm3_0 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_0)
 
-        self.conv3_1 = nn.Conv2d(in_channels=256,out_channels=256,kernel_size=(3, 3),padding=(1, 1),)
+        self.conv3_1 = nn.Conv2d(in_channels=256,out_channels=256,kernel_size=(3, 3),padding=(1,1),)
         self.batch_norm3_1 = nn.BatchNorm2d(256)
         self.initialise_layer(self.conv3_1)
         self.pool3 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
@@ -109,7 +109,11 @@ class SiameseCNN(nn.Module):
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
+        self.dropout_conv4 = nn.Dropout2d(p=0.3)
 
+        
+
+    
 
         # fully connected layers:
               
@@ -123,23 +127,27 @@ class SiameseCNN(nn.Module):
 
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
         
-        x = F.relu(self.batch_norm_1_0(self.conv_1_0(x)))
-        x = F.relu(self.batch_norm_1_1(self.conv_1_1(x))) 
+        x = self.activation(self.batch_norm_1_0(self.conv_1_0(x)))
+        x = self.activation(self.batch_norm_1_1(self.conv_1_1(x))) 
+        #x = self.dropout_conv1 (x)
         x= self.pool1(x)  
 
 
-        x= F.relu(self.batch_norm2_0(self.conv2_0(x)))
-        x= F.relu(self.batch_norm2_1(self.conv2_1(x)))
+        x= self.activation(self.batch_norm2_0(self.conv2_0(x)))
+        x= self.activation(self.batch_norm2_1(self.conv2_1(x)))
+        #x = self.dropout_conv2 (x)
         x= self.pool2(x)   
 
 
-        x= F.relu(self.batch_norm3_0(self.conv3_0(x)))
-        x= F.relu(self.batch_norm3_1(self.conv3_1(x)))
+        x= self.activation(self.batch_norm3_0(self.conv3_0(x)))
+        x= self.activation(self.batch_norm3_1(self.conv3_1(x)))
+        #x = self.dropout_conv3 (x)
         x= self.pool3(x)
         
 
-        x= F.relu(self.batch_norm4_0(self.conv4_0(x)))
-        x= F.relu(self.batch_norm4_1(self.conv4_1(x)))
+        x= self.activation(self.batch_norm4_0(self.conv4_0(x)))
+        x= self.activation(self.batch_norm4_1(self.conv4_1(x)))
+        x = self.dropout_conv4 (x)
         x= self.pool4(x)
 
         
@@ -171,7 +179,7 @@ class SiameseCNN(nn.Module):
         # x = self.dropout(concatenated_features)
         # print (f"concatenated shape: {concatenated_features.shape}")
         # Pass through fully connected layers with ReLU and dropout
-        x = F.relu(self.fc1(concatenated_features))
+        x = self.activation(self.fc1(concatenated_features))
         x = self.dropout(x)
         output = self.fc2(x)
     
@@ -232,23 +240,44 @@ def main(args):
         transforms.ToTensor(),
     ])
 
+    train_transform = transforms.Compose([
+        # Optionally apply random brightness/contrast adjustments
+        transforms.RandomApply([
+            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1)
+        ], p=0.5),  # Apply with 50% probability
+        
+        # Resize image to ensure consistency in size (224x224)
+        transforms.Resize(256),  # Resize to a larger size to allow cropping
+        
+        # Crop the bottom half of the image with random resize to 224x224
+        transforms.RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.8, 1.0)),
+        
+        # Convert the image to a tensor and normalize
+        transforms.ToTensor(),
+        
+        # Optional: Normalize to a certain mean and std for transfer learning (if required)
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=train_transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
         root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
     )
 
+
     val_dataset = ProgressionDataset(   
         root_dir=os.path.join(args.dataset_root, "val"), transform=transform, mode="val",  label_file=str(args.dataset_root / "val_labels.txt")
     )
-
-    train_loader = torch.utils.data.DataLoader(
+    # ---- Loaders ----
+    train_loader = DataLoader(
         train_dataset,
-        shuffle=True,
+        shuffle = True,
         batch_size=args.batch_size,
-        pin_memory=True,
         num_workers=args.worker_count,
+        pin_memory=True,
     )
     test_loader = torch.utils.data.DataLoader(
         test_dataset,
@@ -490,9 +519,13 @@ class Trainer:
             np.array(results["labels"]), np.array(results["preds"])
         )
 
+        # Confusion Matrix
+        cm = confusion_matrix(np.array(results["labels"]), np.array(results["preds"]))
         print("\n" + "---" * 20)
         print(f"FINAL TEST RESULTS")
         print(f"Test Accuracy: {accuracy * 100:2.2f}%")
+        print(f"Confusion Matrix on Test Set:")
+        print(cm)
         print("---" * 20 + "\n")
 
 def compute_accuracy(
@@ -557,13 +590,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=1e-5,
+        default=2.5e-4,
         help="Learning rate for optimizer.",
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=30,
+        default=50,
         help="Number of training epochs.",
     )
     parser.add_argument(
@@ -593,7 +626,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--weight_decay",
         type=float,
-        default=1e-4,
+        default=0,
         help="Weight decay (L2 penalty) for optimizer.",
     )
     args = parser.parse_args()
