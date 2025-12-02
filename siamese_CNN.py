@@ -229,7 +229,7 @@ def main(args):
             List of recipe folder names (required for 'train' mode).
         epoch_size : int, optional
             Number of samples per epoch (required for 'train' mode).
-        label_file : str, optional
+        label_file : str, optionaltransforms.CenterCrop(int(224 * 0.4)),
             Path to text file containing image pair indices and labels 
             (required for 'val'/'test' mode).
         """
@@ -245,7 +245,11 @@ def main(args):
         transforms.RandomApply([
             transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1)
         ], p=0.5),  # Apply with 50% probability
-        
+
+        # Randomly apply greyscale conversion
+        transforms.RandomGrayscale(p=0.4),  # 40% chance to convert to grayscale
+
+
         # Resize image to ensure consistency in size (224x224)
         transforms.Resize(256),  # Resize to a larger size to allow cropping
         
@@ -254,10 +258,9 @@ def main(args):
         
         # Convert the image to a tensor and normalize
         transforms.ToTensor(),
-        
-        # Optional: Normalize to a certain mean and std for transfer learning (if required)
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
+
+
 
     
     train_dataset = ProgressionDataset(
@@ -294,9 +297,11 @@ def main(args):
         pin_memory=True,
     )
 
-    model = SiameseCNN(height=224, width=224, channels=3, class_count=3)
+    
 
-    criterion = nn.CrossEntropyLoss()
+    model = SiameseCNN(height=224, width=224, channels=3, class_count=3)
+    weights = torch.tensor([1.0, 1.0, 1.0]).to(DEVICE)
+    criterion = nn.CrossEntropyLoss(weight=weights)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
@@ -309,7 +314,7 @@ def main(args):
     )
 
     trainer = Trainer(
-        model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
+        model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE,resume_from_checkpoint=args.resume_from_checkpoint
     )
 
     trainer.train(
@@ -335,6 +340,7 @@ class Trainer:
         optimizer: Optimizer,
         summary_writer: SummaryWriter,
         device: torch.device,
+        resume_from_checkpoint: str = None,
     ):
         self.model = model.to(device)
         self.device = device
@@ -345,6 +351,21 @@ class Trainer:
         self.optimizer = optimizer
         self.summary_writer = summary_writer
         self.step = 0
+
+        if resume_from_checkpoint:
+            self.load_model(resume_from_checkpoint)
+    def load_model(self, checkpoint_path: str):
+        """
+        Loads the model's weights from a checkpoint file.
+
+        Args:
+            checkpoint_path (str): Path to the checkpoint file.
+        """
+        print(f"Loading model from checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        self.model.load_state_dict(checkpoint)
+        
+        print(f"Model loaded from checkpoint.")
 
     def train(
         self,
@@ -451,6 +472,10 @@ class Trainer:
         self.summary_writer.add_scalar(
                 "time/data", step_time, self.step
         )
+    def save_model(self, path="best_models/siamese_CNN_model.pth"):
+        torch.save(self.model.state_dict(), path)
+        print(f"Model parameters saved to: {path}")
+
 
     def validate(self):
         results = {"preds": [], "labels": []}
@@ -518,6 +543,8 @@ class Trainer:
         accuracy = compute_accuracy(
             np.array(results["labels"]), np.array(results["preds"])
         )
+        if accuracy >= 0.45:
+            self.save_model(path=f"best_models/{accuracy}.pth")
 
         # Confusion Matrix
         cm = confusion_matrix(np.array(results["labels"]), np.array(results["preds"]))
@@ -552,8 +579,11 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
         from getting logged to the same TB log directory (which you can't easily
         untangle in TB).
     """
-    tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
-    tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
+    if args.save_dir_name != "":
+        tb_log_dir_prefix = args.save_dir_name
+    else:
+        # tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
+        tb_log_dir_prefix =f'CNN_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
     i = 0
     while i < 1000:
         tb_log_dir = args.log_dir / (tb_log_dir_prefix + str(i))
@@ -628,6 +658,20 @@ if __name__ == "__main__":
         type=float,
         default=0,
         help="Weight decay (L2 penalty) for optimizer.",
+    )
+
+    parser.add_argument(
+        "--save_dir_name",
+        type=str,
+        default="",
+        help="Name of directory to save best model weights.",
+    )
+
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default="",
+        help="Path to model checkpoint to resume training from.",
     )
     args = parser.parse_args()
 
