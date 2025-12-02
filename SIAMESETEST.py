@@ -56,7 +56,7 @@ class SiameseCNN(nn.Module):
         
         print(f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes.")
 
-        self.activation = nn.LeakyReLU(negative_slope=0.01)
+        self.activation = nn.ReLU()
 
         # convolutional layers:
         # ((conv, batch norm) x 2 , pool) x 4
@@ -109,7 +109,7 @@ class SiameseCNN(nn.Module):
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-        self.dropout_conv4 = nn.Dropout2d(p=0.3)
+        #self.dropout_conv4 = nn.Dropout2d(p=0.3)
 
         
 
@@ -147,7 +147,7 @@ class SiameseCNN(nn.Module):
 
         x= self.activation(self.batch_norm4_0(self.conv4_0(x)))
         x= self.activation(self.batch_norm4_1(self.conv4_1(x)))
-        x = self.dropout_conv4 (x)
+        #x = self.dropout_conv4 (x)
         x= self.pool4(x)
 
         
@@ -261,7 +261,7 @@ def main(args):
 
     
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=train_transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
         root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
@@ -532,6 +532,8 @@ class Trainer:
         print(f"Confusion Matrix on Test Set:")
         print(cm)
         print("---" * 20 + "\n")
+
+
 
     def save_model(self, path="best_models/siamese_CNN_model.pth"):
         torch.save(self.model.state_dict(), path)
