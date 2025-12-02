@@ -109,7 +109,7 @@ class SiameseCNN(nn.Module):
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
-        self.dropout_conv4 = nn.Dropout2d(p=0.3)
+        # self.dropout_conv4 = nn.Dropout2d(p=0.3)
 
         
 
@@ -147,7 +147,7 @@ class SiameseCNN(nn.Module):
 
         x= self.activation(self.batch_norm4_0(self.conv4_0(x)))
         x= self.activation(self.batch_norm4_1(self.conv4_1(x)))
-        x = self.dropout_conv4 (x)
+        # x = self.dropout_conv4 (x)
         x= self.pool4(x)
 
         
@@ -247,7 +247,7 @@ def main(args):
         ], p=0.5),  # Apply with 50% probability
 
         # Randomly apply greyscale conversion
-        transforms.RandomGrayscale(p=0.4),  # 40% chance to convert to grayscale
+        transforms.RandomGrayscale(p=0.1),  # 10% chance to convert to grayscale
 
 
         # Resize image to ensure consistency in size (224x224)
