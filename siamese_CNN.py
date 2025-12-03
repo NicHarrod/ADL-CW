@@ -519,8 +519,6 @@ class Trainer:
             np.array(results["labels"]), np.array(results["preds"])
         )
 
-        os.makedirs("best_models", exist_ok=True)
-
         if accuracy >= 0.45:
             self.save_model(path=f"best_models/{accuracy}.pth")
 

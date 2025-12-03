@@ -56,7 +56,7 @@ class SiameseCNN(nn.Module):
         
         print(f"Building Siamese CNN with input shape {self.input_shape} and {self.class_count} output classes.")
 
-        self.activation = nn.ReLU()
+        self.activation = nn.LeakyReLU(negative_slope=0.01)
 
         # convolutional layers:
         # ((conv, batch norm) x 2 , pool) x 4
@@ -240,28 +240,24 @@ def main(args):
         transforms.ToTensor(),
     ])
 
+
     train_transform = transforms.Compose([
-        # Optionally apply random brightness/contrast adjustments
-        transforms.RandomApply([
-            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1)
-        ], p=0.5),  # Apply with 50% probability
+        # Always apply grayscale conversion
+        transforms.RandomGrayscale(p=0.1),  
+
+        # Apply slight random rotation (e.g., -10 to 10 degrees)
+        #transforms.RandomRotation(degrees=10),
         
         # Resize image to ensure consistency in size (224x224)
-        transforms.Resize(256),  # Resize to a larger size to allow cropping
-        
-        # Crop the bottom half of the image with random resize to 224x224
-        transforms.RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.8, 1.0)),
+        transforms.Resize(224),  # Resize to 224x224 (no cropping)
         
         # Convert the image to a tensor and normalize
         transforms.ToTensor(),
-        
-        # Optional: Normalize to a certain mean and std for transfer learning (if required)
-        # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     
     train_dataset = ProgressionDataset(
-        root_dir=os.path.join(args.dataset_root, "train"), transform=transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
+        root_dir=os.path.join(args.dataset_root, "train"), transform=train_transform, mode="train", epoch_size = 2000,  recipe_ids_list=[os.path.basename(p) for p in (args.dataset_root / "train").glob("*")]
     )
     test_dataset = ProgressionDataset(
         root_dir=os.path.join(args.dataset_root, "test"), transform=transform, mode="test",  label_file=str(args.dataset_root / "test_labels.txt")
