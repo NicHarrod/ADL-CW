@@ -19,7 +19,7 @@ import pathlib
 import random 
 from sklearn.metrics import confusion_matrix
 
-
+import matplotlib.pyplot as plt
 
 def set_seed(seed):
     random.seed(seed)
@@ -32,7 +32,7 @@ def set_seed(seed):
         torch.backends.cudnn.benchmark = False
 
 # Call this at the start of main
-SEED = 42 # You can choose any integer
+SEED = 42 # any integer - Meaning of life!
 set_seed(SEED)
 
 
@@ -109,6 +109,7 @@ class SiameseCNN(nn.Module):
         self.initialise_layer(self.conv4_1)
         self.pool4 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
 
+        # Trialed Improvement - Adding more dropout
         #self.dropout_conv4 = nn.Dropout2d(p=0.3)
 
         
@@ -128,7 +129,8 @@ class SiameseCNN(nn.Module):
     def convForward(self, x: torch.Tensor) -> torch.Tensor:
         
         x = self.activation(self.batch_norm_1_0(self.conv_1_0(x)))
-        x = self.activation(self.batch_norm_1_1(self.conv_1_1(x))) 
+        x = self.activation(self.batch_norm_1_1(self.conv_1_1(x)))
+        # Extra dropout continued 
         #x = self.dropout_conv1 (x)
         x= self.pool1(x)  
 
@@ -195,6 +197,9 @@ class SiameseCNN(nn.Module):
 
 
 def test_CNN():
+    '''
+    Simple test we used early on to ensure the sizes were correct
+    '''
     model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
     # generate 2 batches of 1 image each
     sample_inputs = [torch.randn(1, 3, 512, 512), torch.randn(1, 3, 512, 512)]
@@ -202,8 +207,12 @@ def test_CNN():
     resize = transforms.Resize((224, 224))
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
+    print(output.shape)
 
 def test_forward():
+    '''
+    Simple test we used early on to ensure the sizes were correct
+    '''
     model = SiameseCNN(height=512, width=512, channels=3, class_count=3)
     # generate 2 batches of 1 image each
     sample_inputs = [torch.randn(1, 3, 512, 512), torch.randn(1, 3, 512, 512)]
@@ -211,28 +220,10 @@ def test_forward():
     resize = transforms.Resize((224, 224))
     sample_inputs = [resize(img) for img in sample_inputs]
     output = model(sample_inputs)
-    # print(output.shape)
+    print(output.shape)
+
 def main(args):
     torch.backends.cudnn.benchmark = True
-    """
-        Initialize the ProgressionDataset.
-
-        Parameters
-        ----------
-        root_dir : str
-            Root directory containing recipe folders or image pairs.
-        transform : callable, optional
-            Optional torchvision transform for image preprocessing.
-        mode : str, default='train'
-            Operation mode: 'train', 'val', or 'test'.
-        recipe_ids_list : list of str, optional
-            List of recipe folder names (required for 'train' mode).
-        epoch_size : int, optional
-            Number of samples per epoch (required for 'train' mode).
-        label_file : str, optional
-            Path to text file containing image pair indices and labels 
-            (required for 'val'/'test' mode).
-        """
 
 
     transform = transforms.Compose([
@@ -242,7 +233,22 @@ def main(args):
 
 
     train_transform = transforms.Compose([
-        # Always apply grayscale conversion
+        # We initially trialed multiple data augmentation types, most notably the cropping feature in order to change what our model was focusing on 
+        # # Optionally apply random brightness/contrast adjustments
+        # transforms.RandomApply([
+        #     transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1)
+        # ], p=0.5),  # Apply with 50% probability
+        
+        # # Resize image to ensure consistency in size (224x224)
+        # transforms.Resize(256),  # Resize to a larger size to allow cropping
+        
+        # # Crop the bottom half of the image with random resize to 224x224
+        # transforms.RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.8, 1.0)),
+
+
+
+
+        # Apply grayscale conversion 10% of the time
         transforms.RandomGrayscale(p=0.1),  
 
         # Apply slight random rotation (e.g., -10 to 10 degrees)
@@ -267,7 +273,7 @@ def main(args):
     val_dataset = ProgressionDataset(   
         root_dir=os.path.join(args.dataset_root, "val"), transform=transform, mode="val",  label_file=str(args.dataset_root / "val_labels.txt")
     )
-    # ---- Loaders ----
+    # Loaders
     train_loader = DataLoader(
         train_dataset,
         shuffle = True,
@@ -293,7 +299,7 @@ def main(args):
     model = SiameseCNN(height=224, width=224, channels=3, class_count=3)
 
     criterion = nn.CrossEntropyLoss()
-
+    # In our final model we don't use weight decay but we still tested it
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
 
     
@@ -305,7 +311,7 @@ def main(args):
     )
 
     trainer = Trainer(
-        model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
+        model, train_loader, val_loader, test_loader, criterion, optimizer, summary_writer, DEVICE, resume_dir = args.resume_dir
     )
 
     trainer.train(
@@ -331,6 +337,7 @@ class Trainer:
         optimizer: Optimizer,
         summary_writer: SummaryWriter,
         device: torch.device,
+        resume_dir :str = None
     ):
         self.model = model.to(device)
         self.device = device
@@ -341,6 +348,8 @@ class Trainer:
         self.optimizer = optimizer
         self.summary_writer = summary_writer
         self.step = 0
+        if resume_dir :
+            self.load_model(resume_dir )
 
     def train(
         self,
@@ -350,10 +359,13 @@ class Trainer:
         log_frequency: int = 5,
         start_epoch: int = 0
     ):
+        # entering into train mode
         self.model.train()
+        # main training loop
         for epoch in range(start_epoch, epochs):
             self.model.train()
             data_load_start_time = time.time()
+            # running through each image pair
             for img_a, img_b, labels in self.train_loader:
                 batch = [img_a, img_b]
                 batch = [b.to(self.device) for b in batch]
@@ -372,10 +384,11 @@ class Trainer:
 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
+
                 with torch.no_grad():
                     preds = logits.argmax(-1)
                     accuracy = compute_accuracy(labels, preds)
-
+                # just for logs
                 data_load_time = data_load_end_time - data_load_start_time
                 step_time = time.time() - data_load_end_time
 
@@ -390,13 +403,30 @@ class Trainer:
             self.summary_writer.add_scalar("epoch", epoch, self.step)
             if ((epoch + 1) % val_frequency) == 0:
                 self.validate()
-
+                # outputting confusion matrix every 5 steps
                 if ((epoch + 1) % 5) == 0:
                     self.compute_and_print_confusion_matrix(self.val_loader, split_name="val")
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
                 self.model.train()
+    
+    def load_model(self,checkpoint_path: str):
+
+        # since we only save the weights and no other facets of the model that is all we need to load to resume
+
+        print(f"Loading model from checkpoint {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+        self.model.load_state_dict(checkpoint)
+        print("model succesfully loaded")
+
+    def save_model(self, path="best_models/siamese_CNN_model.pth"):
+        torch.save(self.model.state_dict(), path)
+        print(f"Model parameters saved to: {path}")
+
+
     def compute_and_print_confusion_matrix(self, loader, split_name="val"):
+
+        # just outputting confusion matrix
         self.model.eval()
         all_preds = []
         all_labels = []
@@ -483,83 +513,150 @@ class Trainer:
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
+
     def test(self):
         """
-        Evaluates the model on the final, unseen test dataset and prints the results.
+        Evaluates the model AND produces qualitative examples:
+        - 1 good prediction
+        - 2 bad predictions
         """
+        self.model.eval()
         results = {"preds": [], "labels": []}
         total_loss = 0
-        # Set the model to evaluation mode
-        self.model.eval()
 
-        # Disable gradient calculations
+        # Storage for qualitative examples
+        good_examples = []
+        bad_examples = []
+
         with torch.no_grad():
-            # Use the dedicated test_loader for final evaluation
             for img_a, img_b, labels in self.test_loader:
-                batch = [img_a, img_b]
-                batch = [b.to(self.device) for b in batch]
+                batch = [img_a.to(self.device), img_b.to(self.device)]
                 labels = labels.to(self.device)
-                
-                # Forward pass
+
                 logits = self.model(batch)
                 loss = self.criterion(logits, labels)
                 total_loss += loss.item()
-                
-                # Get predictions
-                preds = logits.argmax(dim=-1).cpu().numpy()
-                results["preds"].extend(list(preds))
-                results["labels"].extend(list(labels.cpu().numpy()))
 
-        # Calculate final metrics
+                preds = logits.argmax(dim=-1)
+                results["preds"].extend(preds.cpu().numpy())
+                results["labels"].extend(labels.cpu().numpy())
+
+                #get examples for visualization
+                for i in range(len(preds)):
+                    pred = preds[i].item()
+                    label = labels[i].item()
+                    example = (img_a[i].cpu(), img_b[i].cpu(), label, pred)
+
+                    if pred == label and len(good_examples) < 1:
+                        good_examples.append(example)
+                    if pred != label and len(bad_examples) < 2:
+                        bad_examples.append(example)
+                    if len(good_examples) == 1 and len(bad_examples) == 2:
+                        break
+
+        #compute final accuracy
         accuracy = compute_accuracy(
             np.array(results["labels"]), np.array(results["preds"])
         )
-
-        os.makedirs("best_models", exist_ok=True)
-
-        if accuracy >= 0.45:
-            self.save_model(path=f"best_models/{accuracy}.pth")
-
-        # Confusion Matrix
-        cm = confusion_matrix(np.array(results["labels"]), np.array(results["preds"]))
+        # saving if model is above threshold ( we used 0.5 but hopefully will go higher in the future!)
+        if accuracy >=0.5:
+            self.save_model(path=f"best_models/{accuracy:2.2f}.pth")
+        # Print results
         print("\n" + "---" * 20)
-        print(f"FINAL TEST RESULTS")
+        print("Test Results")
         print(f"Test Accuracy: {accuracy * 100:2.2f}%")
-        print(f"Confusion Matrix on Test Set:")
-        print(cm)
-        print("---" * 20 + "\n")
+        # Generating confusion matrix for test so we can compare to val's confusion matrix
+        print("Confusion Matrix:")
+        print(confusion_matrix(
+            np.array(results["labels"]), np.array(results["preds"])
+        ))
+        print("---" * 20)
+
+        # visualising
+        print("\nGenerating qualitative examples...\n")
+
+        def show_example(img_a, img_b, label, pred, title):
+            img_a_np = img_a.permute(1, 2, 0).numpy()
+            img_b_np = img_b.permute(1, 2, 0).numpy()
+
+            plt.figure(figsize=(10, 4))
+            plt.suptitle(title, fontsize=16)
+
+            plt.subplot(1, 2, 1)
+            plt.imshow(img_a_np)
+            plt.title(f"Anchor\nLabel={label}")
+            plt.axis("off")
+
+            plt.subplot(1, 2, 2)
+            plt.imshow(img_b_np)
+            plt.title(f"Comparator\nPred={pred}")
+            plt.axis("off")
+
+            plt.show()
+
+        # 1 Good example
+        if len(good_examples) > 0:
+            img_a, img_b, label, pred = good_examples[0]
+            show_example(img_a, img_b, label, pred, "GOOD EXAMPLE (Correct Prediction)")
+
+        # 2 Bad examples
+        for idx, (img_a, img_b, label, pred) in enumerate(bad_examples):
+            show_example(img_a, img_b, label, pred, f"BAD EXAMPLE #{idx+1} (Wrong Prediction)")
 
 
 
-    def save_model(self, path="best_models/siamese_CNN_model.pth"):
-        torch.save(self.model.state_dict(), path)
-        print(f"Model parameters saved to: {path}")
+
+def visualize_results(model, test_loader, device, num_examples=3):
+    # This was added for the qualitative results section of our report
+    model.eval()  
+    with torch.no_grad():
+        for idx, (img_a, img_b, labels) in enumerate(test_loader):
+            batch = [img_a.to(device), img_b.to(device)]
+            labels = labels.to(device)
+
+            # get predictions
+            logits = model(batch)
+            preds = logits.argmax(dim=-1).cpu().numpy()
+
+            # Visualize the first examples
+            if idx < num_examples:
+                
+                img_a_np = img_a.cpu().numpy().transpose(0, 2, 3, 1)[0]
+                img_b_np = img_b.cpu().numpy().transpose(0, 2, 3, 1)[0]
+                label = labels.cpu().numpy()[0]
+                pred = preds[0]
+
+                
+                plt.figure(figsize=(12, 6))
+
+                plt.subplot(1, 2, 1)
+                plt.imshow(img_a_np)
+                plt.title(f"Image A - Label: {label}")
+
+                plt.subplot(1, 2, 2)
+                plt.imshow(img_b_np)
+                plt.title(f"Image B - Prediction: {pred}")
+
+                plt.tight_layout()
+                plt.show()
+
+
 
 def compute_accuracy(
     labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
-) -> float:
+):
     """
-    Args:
-        labels: ``(batch_size, class_count)`` tensor or array containing example labels
-        preds: ``(batch_size, class_count)`` tensor or array containing model prediction
+    takes labels and preds as argument and returns accuracy
     """
     assert len(labels) == len(preds)
     return float((labels == preds).sum()) / len(labels)
 
 
-def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
-    """Get a unique directory that hasn't been logged to before for use with a TB
-    SummaryWriter.
-
-    Args:
-        args: CLI Arguments
-
-    Returns:
-        Subdirectory of log_dir with unique subdirectory name to prevent multiple runs
-        from getting logged to the same TB log directory (which you can't easily
-        untangle in TB).
+def get_summary_writer_log_dir(args: argparse.Namespace):
     """
-    tb_log_dir_prefix =f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
+    Generates unique directory from the model's arguments
+    """
+
     tb_log_dir_prefix = f'CNN_bs={args.batch_size}_lr={args.learning_rate}_wd={args.weight_decay}_ep{args.epochs}_run_'
     i = 0
     while i < 1000:
@@ -633,6 +730,12 @@ if __name__ == "__main__":
         type=float,
         default=0,
         help="Weight decay (L2 penalty) for optimizer.",
+    )
+    parser.add_argument(
+        "--resume_dir",
+        type=str,
+        default="",
+        help="Path to model that should be loaded"
     )
     args = parser.parse_args()
 
